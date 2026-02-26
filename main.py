@@ -409,6 +409,66 @@ def run_full_analysis(
         except Exception as e:
             logger.error(f"飞书文档生成失败: {e}")
 
+    # ========================================================
+        # 🚀 新增：将 AI 研报同步到 Future Flow 的专属 Gist 胶囊
+        # ========================================================
+        try:
+            import json
+            import urllib.request
+            
+            gist_token = os.getenv("FF_GIST_TOKEN")
+            gist_id = os.getenv("FF_GIST_ID")
+            
+            # 只有配置了秘钥，且确实有分析结果时才执行
+            if gist_token and gist_id and (results or market_report):
+                logger.info("📡 正在打通数据管道，同步复盘报告至 Future Flow...")
+                
+                # 提取摘要（取大盘复盘的第一句话，或者个股数量）
+                summary_text = "今日市场波澜不惊，各项指标平稳。"
+                if market_report:
+                    first_line = market_report.strip().split('\n')[0].replace('#', '').strip()
+                    summary_text = first_line[:35] + "..." if len(first_line) > 35 else first_line
+                elif results:
+                    summary_text = f"已完成 {len(results)} 只自选股的 AI 深度诊断。"
+
+                # 构建要送给前端的 JSON 数据
+                tz_cn = timezone(timedelta(hours=8))
+                gist_data = {
+                    "hasNew": True,
+                    "date": datetime.now(tz_cn).strftime('%m-%d'),
+                    "summary": summary_text,
+                    "content": full_content  # 这里直接借用上面给飞书准备好的完整排版内容
+                }
+                
+                payload = {
+                    "files": {
+                        "ff_finance_report.json": {
+                            "content": json.dumps(gist_data, ensure_ascii=False, indent=2)
+                        }
+                    }
+                }
+                
+                # 发送 PATCH 请求更新 Gist
+                req = urllib.request.Request(
+                    f"https://api.github.com/gists/{gist_id}",
+                    data=json.dumps(payload).encode('utf-8'),
+                    headers={
+                        "Authorization": f"token {gist_token}",
+                        "Accept": "application/vnd.github.v3+json",
+                        "Content-Type": "application/json"
+                    },
+                    method="PATCH"
+                )
+                
+                with urllib.request.urlopen(req) as response:
+                    if response.status == 200:
+                        logger.info("✅ 成功！复盘数据已精准投递至 Future Flow Gist。")
+                    else:
+                        logger.warning(f"⚠️ Gist 同步状态异常，状态码: {response.status}")
+        except Exception as e:
+            logger.error(f"❌ Future Flow Gist 同步失败: {e}")
+        # ========================================================
+        
         # === Auto backtest ===
         try:
             if getattr(config, 'backtest_enabled', False):
