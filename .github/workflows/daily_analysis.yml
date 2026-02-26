@@ -161,6 +161,9 @@ jobs:
           # 可选值: tencent, akshare_sina, efinance, akshare_em, tushare
           # 如果有 Tushare Pro 高积分账号，可将 tushare 放在首位
           REALTIME_SOURCE_PRIORITY: ${{ vars.REALTIME_SOURCE_PRIORITY || 'tencent,akshare_sina,efinance,akshare_em' }}
+          # 👇 🚀 新增：打通 Future Flow 数据走私通道
+          FF_GIST_TOKEN: ${{ secrets.FF_GIST_TOKEN }}
+          FF_GIST_ID: ${{ secrets.FF_GIST_ID }}
           
         run: |
           # 判断运行模式
