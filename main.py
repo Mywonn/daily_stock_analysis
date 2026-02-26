@@ -409,8 +409,8 @@ def run_full_analysis(
         except Exception as e:
             logger.error(f"飞书文档生成失败: {e}")
 
-    # ========================================================
-        # 🚀 新增：将 AI 研报同步到 Future Flow 的专属 Gist 胶囊 (独立防崩版)
+        # ========================================================
+        # 🚀 新增：将 AI 研报同步到 Future Flow (强力诊断版)
         # ========================================================
         try:
             import json
@@ -419,16 +419,21 @@ def run_full_analysis(
             gist_token = os.getenv("FF_GIST_TOKEN")
             gist_id = os.getenv("FF_GIST_ID")
             
+            # 👇 强力诊断日志：让它在黑匣子里大声喊出来！
+            logger.info("=" * 50)
+            logger.info(f"🔍 [GIST诊断] Token是否有值: {bool(gist_token)}")
+            logger.info(f"🔍 [GIST诊断] ID是否有值: {bool(gist_id)}")
+            logger.info(f"🔍 [GIST诊断] 大盘或个股是否有数据: {bool(results or market_report)}")
+            logger.info("=" * 50)
+            
             if gist_token and gist_id and (results or market_report):
-                logger.info("📡 正在打通数据管道，同步复盘报告至 Future Flow...")
+                logger.info("📡 变量全部就绪，正在发送网络请求...")
                 
-                # 1. 独立生成报告内容 (不再依赖上面的飞书逻辑)
                 ff_content = ""
                 summary_text = "今日市场波澜不惊，各项指标平稳。"
                 
                 if market_report:
                     ff_content += f"# 📈 大盘复盘\n\n{market_report}\n\n---\n\n"
-                    # 提取摘要第一句话
                     first_line = market_report.strip().split('\n')[0].replace('#', '').strip()
                     summary_text = first_line[:35] + "..." if len(first_line) > 35 else first_line
                     
@@ -438,7 +443,6 @@ def run_full_analysis(
                     if not market_report:
                         summary_text = f"已完成 {len(results)} 只自选股的 AI 深度诊断。"
 
-                # 2. 构建 JSON 数据包
                 tz_cn = timezone(timedelta(hours=8))
                 gist_data = {
                     "hasNew": True,
@@ -447,23 +451,12 @@ def run_full_analysis(
                     "content": ff_content
                 }
                 
-                payload = {
-                    "files": {
-                        "ff_finance_report.json": {
-                            "content": json.dumps(gist_data, ensure_ascii=False, indent=2)
-                        }
-                    }
-                }
+                payload = {"files": {"ff_finance_report.json": {"content": json.dumps(gist_data, ensure_ascii=False, indent=2)}}}
                 
-                # 3. 发送强力更新请求
                 req = urllib.request.Request(
                     f"https://api.github.com/gists/{gist_id}",
                     data=json.dumps(payload).encode('utf-8'),
-                    headers={
-                        "Authorization": f"token {gist_token}",
-                        "Accept": "application/vnd.github.v3+json",
-                        "Content-Type": "application/json"
-                    },
+                    headers={"Authorization": f"token {gist_token}", "Accept": "application/vnd.github.v3+json", "Content-Type": "application/json"},
                     method="PATCH"
                 )
                 
@@ -472,8 +465,11 @@ def run_full_analysis(
                         logger.info("✅ 成功！复盘数据已精准投递至 Future Flow Gist。")
                     else:
                         logger.warning(f"⚠️ Gist 同步状态异常，状态码: {response.status}")
+            else:
+                logger.warning("🚫 取消发送：有变量为空，跳过 Gist 同步！")
+                
         except Exception as e:
-            logger.error(f"❌ Future Flow Gist 同步失败: {e}")
+            logger.error(f"❌ Future Flow Gist 同步抛出严重错误: {e}")
         # ========================================================
         
         # === Auto backtest ===
