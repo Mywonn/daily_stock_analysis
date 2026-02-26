@@ -2134,6 +2134,27 @@ class NotificationService:
                     logger.error(f"Telegram rate limited after {max_retries} attempts")
                     return False
             else:
+                  if response.status_code == 400:
+                       try:
+                           result = response.json()
+                           error_desc = result.get('description', '未知错误')
+                           
+                           # 检测到 Markdown 解析失败，启用纯文本兜底逻辑
+                           if 'parse' in error_desc.lower() or 'markdown' in error_desc.lower():
+                               logger.info(f"Telegram 格式解析失败 ({error_desc})，尝试使用纯文本格式重新发送...")
+                               plain_payload = dict(payload)
+                               plain_payload.pop('parse_mode', None)
+                               plain_payload['text'] = text  # 使用未经转换的原始文本
+                               
+                               try:
+                                   fallback_resp = requests.post(api_url, json=plain_payload, timeout=10)
+                                   if fallback_resp.status_code == 200 and fallback_resp.json().get('ok'):
+                                       logger.info("Telegram 消息发送成功（纯文本）")
+                                       return True
+                               except Exception as fb_e:
+                                   logger.error(f"Telegram 纯文本兜底发送失败: {fb_e}")
+                       except Exception:
+                           pass
                 if attempt < max_retries and response.status_code >= 500:
                     delay = 2 ** attempt
                     logger.warning(f"Telegram server error HTTP {response.status_code} "
