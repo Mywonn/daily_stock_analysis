@@ -40,7 +40,7 @@ except ImportError:
 
 from src.config import get_config
 from src.analyzer import AnalysisResult
-from src.formatters import format_feishu_markdown, markdown_to_html_document
+from src.formatters import format_feishu_markdown, markdown_to_html_document, chunk_content_by_max_words
 from bot.models import BotMessage
 
 logger = logging.getLogger(__name__)
@@ -201,6 +201,7 @@ class NotificationService:
         # 消息长度限制（字节）
         self._feishu_max_bytes = getattr(config, 'feishu_max_bytes', 20000)
         self._wechat_max_bytes = getattr(config, 'wechat_max_bytes', 4000)
+        self._discord_max_words = getattr(config, 'discord_max_words', 2000)
 
         # Markdown 转图片（Issue #289）
         self._markdown_to_image_channels = set(
@@ -2105,6 +2106,22 @@ class NotificationService:
                 else:
                     error_desc = result.get('description', '未知错误')
                     logger.error(f"Telegram 返回错误: {error_desc}")
+                    
+                    # If Markdown parsing failed, fall back to plain text
+                    if 'parse' in error_desc.lower() or 'markdown' in error_desc.lower():
+                        logger.info("尝试使用纯文本格式重新发送...")
+                        plain_payload = dict(payload)
+                        plain_payload.pop('parse_mode', None)
+                        plain_payload['text'] = text  # Use original text
+                        
+                        try:
+                            response = requests.post(api_url, json=plain_payload, timeout=10)
+                            if response.status_code == 200 and response.json().get('ok'):
+                                logger.info("Telegram 消息发送成功（纯文本）")
+                                return True
+                        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                            logger.error(f"Telegram plain-text fallback failed: {e}")
+                    
                     return False
             elif response.status_code == 429:
                 # Rate limited — respect Retry-After header
@@ -2118,27 +2135,6 @@ class NotificationService:
                     logger.error(f"Telegram rate limited after {max_retries} attempts")
                     return False
             else:
-                  if response.status_code == 400:
-                       try:
-                           result = response.json()
-                           error_desc = result.get('description', '未知错误')
-                           
-                           # 检测到 Markdown 解析失败，启用纯文本兜底逻辑
-                           if 'parse' in error_desc.lower() or 'markdown' in error_desc.lower():
-                               logger.info(f"Telegram 格式解析失败 ({error_desc})，尝试使用纯文本格式重新发送...")
-                               plain_payload = dict(payload)
-                               plain_payload.pop('parse_mode', None)
-                               plain_payload['text'] = text  # 使用未经转换的原始文本
-                               
-                               try:
-                                   fallback_resp = requests.post(api_url, json=plain_payload, timeout=10)
-                                   if fallback_resp.status_code == 200 and fallback_resp.json().get('ok'):
-                                       logger.info("Telegram 消息发送成功（纯文本）")
-                                       return True
-                               except Exception as fb_e:
-                                   logger.error(f"Telegram 纯文本兜底发送失败: {fb_e}")
-                       except Exception:
-                           pass
                 if attempt < max_retries and response.status_code >= 500:
                     delay = 2 ** attempt
                     logger.warning(f"Telegram server error HTTP {response.status_code} "
@@ -3033,14 +3029,21 @@ class NotificationService:
         Returns:
             是否发送成功
         """
+        # 分割内容，避免单条消息超过 Discord 限制
+        try:
+            chunks = chunk_content_by_max_words(content, self._discord_max_words)
+        except ValueError as e:
+            logger.error(f"分割 Discord 消息失败: {e}, 尝试整段发送。")
+            chunks = [content]
+
         # 优先使用 Webhook（配置简单，权限低）
         if self._discord_config['webhook_url']:
-            return self._send_discord_webhook(content)
-        
+            return all(self._send_discord_webhook(chunk) for chunk in chunks)
+
         # 其次使用 Bot API（权限高，需要 channel_id）
         if self._discord_config['bot_token'] and self._discord_config['channel_id']:
-            return self._send_discord_bot(content)
-        
+            return all(self._send_discord_bot(chunk) for chunk in chunks)
+
         logger.warning("Discord 配置不完整，跳过推送")
         return False
 
