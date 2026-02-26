@@ -410,7 +410,7 @@ def run_full_analysis(
             logger.error(f"飞书文档生成失败: {e}")
 
     # ========================================================
-        # 🚀 新增：将 AI 研报同步到 Future Flow 的专属 Gist 胶囊
+        # 🚀 新增：将 AI 研报同步到 Future Flow 的专属 Gist 胶囊 (独立防崩版)
         # ========================================================
         try:
             import json
@@ -419,25 +419,32 @@ def run_full_analysis(
             gist_token = os.getenv("FF_GIST_TOKEN")
             gist_id = os.getenv("FF_GIST_ID")
             
-            # 只有配置了秘钥，且确实有分析结果时才执行
             if gist_token and gist_id and (results or market_report):
                 logger.info("📡 正在打通数据管道，同步复盘报告至 Future Flow...")
                 
-                # 提取摘要（取大盘复盘的第一句话，或者个股数量）
+                # 1. 独立生成报告内容 (不再依赖上面的飞书逻辑)
+                ff_content = ""
                 summary_text = "今日市场波澜不惊，各项指标平稳。"
+                
                 if market_report:
+                    ff_content += f"# 📈 大盘复盘\n\n{market_report}\n\n---\n\n"
+                    # 提取摘要第一句话
                     first_line = market_report.strip().split('\n')[0].replace('#', '').strip()
                     summary_text = first_line[:35] + "..." if len(first_line) > 35 else first_line
-                elif results:
-                    summary_text = f"已完成 {len(results)} 只自选股的 AI 深度诊断。"
+                    
+                if results:
+                    dashboard_content = pipeline.notifier.generate_dashboard_report(results)
+                    ff_content += f"# 🚀 个股决策仪表盘\n\n{dashboard_content}"
+                    if not market_report:
+                        summary_text = f"已完成 {len(results)} 只自选股的 AI 深度诊断。"
 
-                # 构建要送给前端的 JSON 数据
+                # 2. 构建 JSON 数据包
                 tz_cn = timezone(timedelta(hours=8))
                 gist_data = {
                     "hasNew": True,
                     "date": datetime.now(tz_cn).strftime('%m-%d'),
                     "summary": summary_text,
-                    "content": full_content  # 这里直接借用上面给飞书准备好的完整排版内容
+                    "content": ff_content
                 }
                 
                 payload = {
@@ -448,7 +455,7 @@ def run_full_analysis(
                     }
                 }
                 
-                # 发送 PATCH 请求更新 Gist
+                # 3. 发送强力更新请求
                 req = urllib.request.Request(
                     f"https://api.github.com/gists/{gist_id}",
                     data=json.dumps(payload).encode('utf-8'),
